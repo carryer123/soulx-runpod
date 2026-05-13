@@ -40,7 +40,7 @@ def _ensure_models():
     if not os.path.isdir(CKPT_DIR) or not os.listdir(CKPT_DIR):
         print(f"[soulx] downloading SoulX-FlashHead-1_3B → {CKPT_DIR}", flush=True)
         snapshot_download(
-            repo_id="BytePlus/SoulX-FlashHead",
+            repo_id="Soul-AILab/SoulX-FlashHead-1_3B",
             local_dir=CKPT_DIR,
             local_dir_use_symlinks=False,
         )
