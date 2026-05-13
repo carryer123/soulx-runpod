@@ -1,0 +1,14 @@
+.DS_Store
+*.pyc
+__pycache__/
+source/.git
+source/__pycache__/
+source/**/__pycache__/
+source/lora_out*
+source/lora_data*
+source/gradio_results
+source/fewoov_out
+source/models
+source/.cache
+*.bak.*
+node_modules/
