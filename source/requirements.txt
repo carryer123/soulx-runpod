@@ -17,5 +17,5 @@ pyloudnorm
 decord
 xformers==0.0.31
 librosa
-mediapipe==0.10.9
+mediapipe>=0.10.13
 flask
