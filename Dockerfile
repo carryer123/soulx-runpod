@@ -1,6 +1,6 @@
 # SoulX-FlashHead Lite — RunPod Serverless image
 # Base: RunPod official PyTorch 2.7.1 + CUDA 12.8 + Python 3.11
-FROM runpod/pytorch:2.7.1-py3.11-cuda12.8.1-cudnn-devel-ubuntu22.04
+FROM runpod/pytorch:1.0.3-cu1281-torch271-ubuntu2204
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
