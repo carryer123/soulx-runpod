@@ -59,8 +59,6 @@ def _ensure_pipeline_loaded():
     if _PIPELINE_LOADED:
         return
     _ensure_models()
-    # gradio_app_streaming 안의 run_inference_streaming은 첫 호출 시 pipeline init
-    import gradio_app_streaming  # noqa: F401
     _PIPELINE_LOADED = True
 
 
