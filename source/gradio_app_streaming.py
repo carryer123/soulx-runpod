@@ -489,7 +489,7 @@ with gr.Blocks(title="혜린 라이브 아바타", theme=gr.themes.Soft()) as ap
     )
 
 if __name__ == "__main__":
-        from fastapi import FastAPI as _FastAPI
+    from fastapi import FastAPI as _FastAPI
     from fastapi.responses import JSONResponse as _JSONResponse
     import uvicorn as _uvicorn
     _fa = _FastAPI()
