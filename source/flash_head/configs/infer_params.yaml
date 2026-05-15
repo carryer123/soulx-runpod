@@ -1,6 +1,6 @@
 frame_num: 33
 motion_frames_latent_num: 2
-tgt_fps: 25
+tgt_fps: 20
 sample_rate: 16000
 sample_shift: 5
 color_correction_strength: 1.0
