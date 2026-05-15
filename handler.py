@@ -166,6 +166,8 @@ def handler(event):
             use_face_crop=use_face_crop,
             lora_choice=lora_choice,
             metrics=inference_metrics,
+            mux_segment_audio=False,
+            save_final=False,
         ):
             segments.append(seg)
         timings["streaming_generator_ms"] = _elapsed_ms(t)

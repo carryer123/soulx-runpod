@@ -6,7 +6,9 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     HF_HOME=/runpod-volume/hf_cache \
-    SOULX_MODELS_DIR=/runpod-volume/models
+    SOULX_MODELS_DIR=/runpod-volume/models \
+    SOULX_PRELOAD_MODEL=1 \
+    SOULX_PRELOAD_MODEL_TYPE=lite
 
 # system deps
 RUN apt-get update && apt-get install -y --no-install-recommends \

@@ -93,6 +93,8 @@ def run_inference_streaming(
     use_face_crop,
     lora_choice,
     metrics=None,
+    mux_segment_audio=True,
+    save_final=True,
     progress=gr.Progress(),
 ):
     """
@@ -261,12 +263,15 @@ def run_inference_streaming(
                 stream_dir, f"preview_{timestamp}_seg_{segment_id:04d}.mp4"
             )
             segment_save_start = time.perf_counter()
-            save_video_with_audio(
-                frame_buffer,
-                segment_path,
-                segment_audio_path,
-                fps=tgt_fps,
-            )
+            if mux_segment_audio:
+                save_video_with_audio(
+                    frame_buffer,
+                    segment_path,
+                    segment_audio_path,
+                    fps=tgt_fps,
+                )
+            else:
+                _write_frames_to_mp4(frame_buffer, segment_path, fps=tgt_fps)
             metrics["segment_save_ms"] = metrics.get("segment_save_ms", 0) + int(
                 round((time.perf_counter() - segment_save_start) * 1000)
             )
@@ -284,12 +289,15 @@ def run_inference_streaming(
             stream_dir, f"preview_{timestamp}_seg_{segment_id:04d}.mp4"
         )
         segment_save_start = time.perf_counter()
-        save_video_with_audio(
-            frame_buffer,
-            segment_path,
-            segment_audio_path,
-            fps=tgt_fps,
-        )
+        if mux_segment_audio:
+            save_video_with_audio(
+                frame_buffer,
+                segment_path,
+                segment_audio_path,
+                fps=tgt_fps,
+            )
+        else:
+            _write_frames_to_mp4(frame_buffer, segment_path, fps=tgt_fps)
         metrics["segment_save_ms"] = metrics.get("segment_save_ms", 0) + int(
             round((time.perf_counter() - segment_save_start) * 1000)
         )
@@ -304,14 +312,17 @@ def run_inference_streaming(
     if not accumulated:
         raise gr.Error("No video frames generated. Please check inputs and try again.")
 
-    output_dir = "gradio_results"
-    os.makedirs(output_dir, exist_ok=True)
-    final_filename = f"res_{timestamp}.mp4"
-    final_path = os.path.join(output_dir, final_filename)
-    t = time.perf_counter()
-    save_video_with_audio(accumulated, final_path, audio_path, fps=tgt_fps)
-    mark("final_save_ms", t)
-    logger.info(f"Saved to {final_path}")
+    if save_final:
+        output_dir = "gradio_results"
+        os.makedirs(output_dir, exist_ok=True)
+        final_filename = f"res_{timestamp}.mp4"
+        final_path = os.path.join(output_dir, final_filename)
+        t = time.perf_counter()
+        save_video_with_audio(accumulated, final_path, audio_path, fps=tgt_fps)
+        mark("final_save_ms", t)
+        logger.info(f"Saved to {final_path}")
+    else:
+        metrics["final_save_ms"] = 0
 
 
 
