@@ -238,7 +238,7 @@ def handler(event):
             pass
 
 
-if os.environ.get("SOULX_PRELOAD_MODEL", "1").lower() not in {"0", "false", "no"}:
+if os.environ.get("SOULX_PRELOAD_MODEL", "0").lower() not in {"0", "false", "no"}:
     _preload_timings = {}
     _preload_t = time.perf_counter()
     try:
