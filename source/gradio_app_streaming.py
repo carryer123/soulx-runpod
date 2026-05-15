@@ -92,6 +92,7 @@ def run_inference_streaming(
     seed,
     use_face_crop,
     lora_choice,
+    metrics=None,
     progress=gr.Progress(),
 ):
     """
@@ -99,6 +100,10 @@ def run_inference_streaming(
     推理在独立线程中执行，按 chunk 顺序 infer，结果放入 res_queue。
     """
     global pipeline, loaded_ckpt_dir, loaded_wav2vec_dir, loaded_model_type
+    metrics = metrics if metrics is not None else {}
+
+    def mark(name, start):
+        metrics[name] = int(round((time.perf_counter() - start) * 1000))
 
     if (
         pipeline is None
@@ -109,29 +114,37 @@ def run_inference_streaming(
         progress(0.2, desc="Loading Model...")
         logger.info(f"Loading pipeline with ckpt_dir={ckpt_dir}, wav2vec_dir={wav2vec_dir}")
         try:
+            t = time.perf_counter()
             pipeline = get_pipeline(
                 world_size=1,
                 ckpt_dir=ckpt_dir,
                 model_type=model_type,
                 wav2vec_dir=wav2vec_dir,
             )
+            mark("pipeline_load_ms", t)
             loaded_ckpt_dir = ckpt_dir
             loaded_wav2vec_dir = wav2vec_dir
             loaded_model_type = model_type
         except Exception as e:
             logger.error(f"Failed to load model: {e}")
             raise gr.Error(f"Failed to load model: {e}")
+    else:
+        metrics["pipeline_load_ms"] = 0
 
+    t = time.perf_counter()
     apply_lora_state(pipeline, LORA_CHOICES.get(lora_choice))
+    mark("lora_ms", t)
     progress(0.5, desc="Preparing Data...")
     base_seed = int(seed) if seed >= 0 else 9999
     try:
+        t = time.perf_counter()
         get_base_data(
             pipeline,
             cond_image_path_or_dir=cond_image,
             base_seed=base_seed,
             use_face_crop=use_face_crop,
         )
+        mark("get_base_data_ms", t)
     except Exception as e:
         logger.error(f"Error in get_base_data: {e}")
         raise gr.Error(f"Error processing inputs: {e}")
@@ -145,7 +158,9 @@ def run_inference_streaming(
     slice_len = frame_num - motion_frames_num
 
     try:
+        t = time.perf_counter()
         human_speech_array_all, _ = librosa.load(audio_path, sr=sample_rate, mono=True)
+        mark("audio_load_ms", t)
     except Exception as e:
         raise gr.Error(f"Failed to load audio file: {e}")
 
@@ -172,8 +187,11 @@ def run_inference_streaming(
         raise gr.Error("Audio too short: no chunks to generate. Please use a longer audio.")
 
     # Data prepare：按每 k 个 chunk 合并为一段 wav 保存（时间戳+segment_id 命名）
+    t = time.perf_counter()
     segment_audio_paths = {}
     num_segments = (total_chunks + CHUNKS_PER_SEGMENT - 1) // CHUNKS_PER_SEGMENT
+    metrics["total_chunks"] = int(total_chunks)
+    metrics["num_segments"] = int(num_segments)
     for segment_id in range(num_segments):
         start = segment_id * CHUNKS_PER_SEGMENT
         end = min(start + CHUNKS_PER_SEGMENT, total_chunks)
@@ -191,6 +209,7 @@ def run_inference_streaming(
     logger.info(
         f"Pre-saved {num_segments} segment audios (every {CHUNKS_PER_SEGMENT} chunks) under {stream_dir}"
     )
+    mark("segment_audio_prep_ms", t)
 
     # 结果队列：推理线程放入 (chunk_idx, chunk_frames_np)，主线程根据 chunk_id 取对应音频合并
     res_queue = queue.Queue()
@@ -198,21 +217,30 @@ def run_inference_streaming(
     def inference_worker():
         """单独线程：按 chunk 顺序执行 infer，每生成一帧就放入 res_queue，立即继续下一 chunk。"""
         audio_dq = deque([0.0] * cached_audio_length_sum, maxlen=cached_audio_length_sum)
+        chunk_costs_ms = []
         for chunk_idx, human_speech_array in enumerate(human_speech_array_slices):
             audio_dq.extend(human_speech_array.tolist())
             audio_array = np.array(audio_dq)
+            audio_t = time.perf_counter()
             audio_embedding = get_audio_embedding(pipeline, audio_array, audio_start_idx, audio_end_idx)
+            chunk_audio_ms = int(round((time.perf_counter() - audio_t) * 1000))
             torch.cuda.synchronize()
             start_time = time.time()
             video = run_pipeline(pipeline, audio_embedding)
             video = video[motion_frames_num:]
             torch.cuda.synchronize()
-            logger.info(f"Infer chunk-{chunk_idx} done, cost time: {time.time() - start_time:.2f}s")
+            chunk_infer_ms = int(round((time.time() - start_time) * 1000))
+            chunk_costs_ms.append(chunk_infer_ms)
+            logger.info(f"Infer chunk-{chunk_idx} done, infer={chunk_infer_ms}ms audio_embedding={chunk_audio_ms}ms")
             chunk_frames_np = video.cpu().numpy()
             res_queue.put((chunk_idx, chunk_frames_np))
+        metrics["chunk_infer_ms"] = chunk_costs_ms
+        metrics["chunk_infer_total_ms"] = int(sum(chunk_costs_ms))
+        metrics["chunk_infer_max_ms"] = int(max(chunk_costs_ms) if chunk_costs_ms else 0)
         res_queue.put(None)  # 结束哨兵
 
     worker_thread = threading.Thread(target=inference_worker)
+    inference_start = time.perf_counter()
     worker_thread.start()
     logger.info("Inference worker thread started. Main will consume res_queue and yield video paths.")
 
@@ -232,11 +260,15 @@ def run_inference_streaming(
             segment_path = os.path.join(
                 stream_dir, f"preview_{timestamp}_seg_{segment_id:04d}.mp4"
             )
+            segment_save_start = time.perf_counter()
             save_video_with_audio(
                 frame_buffer,
                 segment_path,
                 segment_audio_path,
                 fps=tgt_fps,
+            )
+            metrics["segment_save_ms"] = metrics.get("segment_save_ms", 0) + int(
+                round((time.perf_counter() - segment_save_start) * 1000)
             )
             logger.info(
                 f"Saved segment-{segment_id} (chunks {segment_id * CHUNKS_PER_SEGMENT}-{chunk_idx}) and yielding to frontend."
@@ -251,11 +283,15 @@ def run_inference_streaming(
         segment_path = os.path.join(
             stream_dir, f"preview_{timestamp}_seg_{segment_id:04d}.mp4"
         )
+        segment_save_start = time.perf_counter()
         save_video_with_audio(
             frame_buffer,
             segment_path,
             segment_audio_path,
             fps=tgt_fps,
+        )
+        metrics["segment_save_ms"] = metrics.get("segment_save_ms", 0) + int(
+            round((time.perf_counter() - segment_save_start) * 1000)
         )
         logger.info(
             f"Saved final segment-{segment_id} ({len(frame_buffer)} chunks) and yielding to frontend."
@@ -263,6 +299,7 @@ def run_inference_streaming(
         yield os.path.abspath(segment_path)
 
     worker_thread.join()
+    mark("inference_thread_wall_ms", inference_start)
 
     if not accumulated:
         raise gr.Error("No video frames generated. Please check inputs and try again.")
@@ -271,7 +308,9 @@ def run_inference_streaming(
     os.makedirs(output_dir, exist_ok=True)
     final_filename = f"res_{timestamp}.mp4"
     final_path = os.path.join(output_dir, final_filename)
+    t = time.perf_counter()
     save_video_with_audio(accumulated, final_path, audio_path, fps=tgt_fps)
+    mark("final_save_ms", t)
     logger.info(f"Saved to {final_path}")
 
 
